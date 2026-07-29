@@ -11,6 +11,10 @@ temp/
 config/settings.json
 config/.fernet_key
 config/_load_error.log
+config/bilibili_cookies.txt
+config/stock_up_list.xlsx
+config/debug.log
+backend/task_queue/
 data/parsed_records.json
 .codex/
 .agents/

@@ -19,6 +19,13 @@ if _IS_FROZEN:
     _BUNDLE_CONFIG = Path(sys._MEIPASS) / "config" / "settings.json"
     if _BUNDLE_CONFIG.exists() and not (CONFIG_DIR / "settings.json").exists():
         shutil.copy2(str(_BUNDLE_CONFIG), str(CONFIG_DIR / "settings.json"))
+        _did_copy = True
+    else:
+        _did_copy = False
+    # Also copy .fernet_key on first run — critical for decrypting existing API keys
+    _BUNDLE_KEY = _BUNDLE_CONFIG.parent / ".fernet_key"
+    if _BUNDLE_KEY.exists() and not (CONFIG_DIR / ".fernet_key").exists() and _did_copy:
+        shutil.copy2(str(_BUNDLE_KEY), str(CONFIG_DIR / ".fernet_key"))
 else:
     CONFIG_DIR = Path(__file__).parent.parent / "config"
 
@@ -38,6 +45,7 @@ DEFAULTS = {
     "data_source_token": "",
     "sentiment_dir": "",
     "output_dir": "",
+    "parse_save_path": "",
     "recent_etfs": [],
     "manual_positions": [],
     "manual_balance": {},

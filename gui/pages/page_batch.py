@@ -17,7 +17,7 @@ else:
         sys.path.insert(0, str(_project_root))
 
 from tkinter import (
-    Button, Canvas, Entry, Frame, Label, Listbox, Toplevel, ttk, messagebox, filedialog,
+    Button, Entry, Frame, Label, Listbox, StringVar, Toplevel, ttk, messagebox, filedialog,
 )
 
 from backend.batch_parser import batch_parse
@@ -25,12 +25,14 @@ from backend.up_manager import load_up_list, save_up_list, fetch_up_name
 from backend import config_manager, time_price_judge, task_queue_manager
 
 from gui.utils import debug, peak_dialog
+from gui.timeline import get_timeline
 
 # ── 模块级状态 ──
 batch_save_path = config_manager.get_setting("batch_save_path")
 cancel_event_2 = Event()
 today = _dt.date.today()
-_selected_target_dates = [today.strftime("%Y-%m-%d")]
+yesterday = today - _dt.timedelta(days=1)
+_selected_target_dates = [yesterday.strftime("%Y-%m-%d")]
 _date_popup = None
 
 # 外部注入
@@ -78,7 +80,7 @@ def toggle_select_all(treeview_1, event=None):
         treeview_1.set(item, "选中", new_state)
 
 
-def on_double_click_edit(treeview_1, treeview_1_cols, page_frame_2, window, event):
+def on_double_click_edit(treeview_1, treeview_1_cols, window, event):
     region = treeview_1.identify("region", event.x, event.y)
     if region != "cell":
         return
@@ -100,11 +102,11 @@ def on_double_click_edit(treeview_1, treeview_1_cols, page_frame_2, window, even
     current_value = treeview_1.set(iid, col_name)
 
     edit_entry = Entry(
-        page_frame_2,
+        treeview_1,
         font=("Inter", 13),
         bd=1, relief="solid", justify="center"
     )
-    edit_entry.place(x=6 + x_cell, y=10 + y_cell, width=w_cell, height=h_cell)
+    edit_entry.place(x=x_cell, y=y_cell, width=w_cell, height=h_cell)
     edit_entry.insert(0, current_value)
     edit_entry.select_range(0, "end")
     edit_entry.focus_set()
@@ -175,15 +177,14 @@ def delete_selected(treeview_1):
 
 # ── 按钮回调 ──
 
-def button_batch_browse_clicked(canvas_page_2, entry_batch_path_text):
+def button_batch_browse_clicked(path_var):
     global batch_save_path
     path = filedialog.askdirectory(title="选择批量解析保存路径")
     if path:
         batch_save_path = path
         config_manager.set_setting("batch_save_path", path)
         debug(f"批量保存路径已选: {path}")
-        canvas_page_2.itemconfigure(entry_batch_path_text,
-            text=path[:40] + "..." if len(path) > 40 else path)
+        path_var.set(path[:40] + "..." if len(path) > 40 else path)
 
 
 def button_6_clicked(treeview_1):
@@ -210,15 +211,17 @@ def _update_progress_2(progress_label_2, progress_bar_2, msg, pct):
 
 
 def _finish_parse_2(window, success, msg, progress_bar_2, button_stop_2,
-                    progress_label_2, button_5):
-    progress_bar_2.place_forget()
-    button_stop_2.place_forget()
+                    progress_label_2, button_5, progress_row_bottom):
+    progress_bar_2.pack_forget()
+    button_stop_2.pack_forget()
+    progress_row_bottom.pack_forget()
     progress_label_2.configure(text=f"  {'✅' if success else '❌'} {msg}")
     button_5.config(state="normal", fg="#FFFFFF")
 
 
 def button_5_clicked(window, treeview_1,
-                     progress_label_2, progress_bar_2, button_stop_2, button_5):
+                     progress_label_2, progress_bar_2, button_stop_2, button_5,
+                     progress_row_bottom):
     global cancel_event_2
     try:
         debug("button_5 CLICKED")
@@ -238,6 +241,7 @@ def button_5_clicked(window, treeview_1,
             return
 
         target_dates = list(_selected_target_dates)
+        debug(f"batch_parse target_dates: {target_dates}")
 
         if time_price_judge.is_peak():
             result = peak_dialog(window)
@@ -262,16 +266,20 @@ def button_5_clicked(window, treeview_1,
 
         cancel_event_2.clear()
 
+        tl = get_timeline()
+        if tl:
+            window.after(0, tl.reset)
+            window.after(0, tl.highlight, "fetch")
+
+        _tl_seen = set()
+
         button_5.config(state="disabled", fg="#AAAAAA")
         progress_label_2.configure(text=f"  准备处理 {len(selected_uids)} 个UP主 × {len(target_dates)} 天... 0%")
-        progress_label_2.place(x=6, y=610, width=310, height=18)
-        progress_label_2.tkraise()
-        progress_bar_2.configure(value=0, maximum=100, mode="determinate")
-        progress_bar_2.place(x=6, y=632, width=240, height=14)
-        progress_bar_2.tkraise()
+        progress_label_2.pack(fill="x", padx=(0, 4))
+        progress_row_bottom.pack(fill="x", pady=(2, 0))
+        progress_bar_2.pack(side="left", fill="x", expand=True, padx=(0, 4))
         button_stop_2.configure(command=lambda: cancel_event_2.set())
-        button_stop_2.place(x=254, y=629, width=65, height=20)
-        button_stop_2.tkraise()
+        button_stop_2.pack(side="right")
 
         def run():
             total_dates = len(target_dates)
@@ -280,6 +288,21 @@ def button_5_clicked(window, treeview_1,
             total_videos = 0
 
             def progress_callback(ptype, msg, pct=0):
+                # ── 时间轴更新 ──
+                if tl:
+                    if "下载" in msg and "fetch" not in _tl_seen:
+                        _tl_seen.add("fetch"); window.after(0, tl.highlight, "fetch")
+                    elif ("音频" in msg or "提取" in msg) and "audio" not in _tl_seen:
+                        _tl_seen.add("audio"); window.after(0, tl.highlight, "audio")
+                    elif "转写" in msg and "transcribe" not in _tl_seen:
+                        _tl_seen.add("transcribe"); window.after(0, tl.highlight, "transcribe")
+                    if ptype == "done":
+                        window.after(0, lambda: tl.set_step_status("transcribe", "done"))
+                    elif ptype == "error":
+                        window.after(0, lambda: tl.set_step_status("transcribe", "error"))
+                    elif ptype == "cancelled":
+                        window.after(0, lambda: tl.set_step_status("transcribe", "error"))
+
                 if ptype == "progress":
                     window.after(0, lambda m=msg, p=pct: _update_progress_2(
                         progress_label_2, progress_bar_2, m, p))
@@ -291,14 +314,16 @@ def button_5_clicked(window, treeview_1,
                 elif ptype == "cancelled":
                     window.after(0, lambda m=msg: _finish_parse_2(
                         window, False, m, progress_bar_2, button_stop_2,
-                        progress_label_2, button_5))
+                        progress_label_2, button_5, progress_row_bottom))
 
             try:
                 for date_idx, target_date in enumerate(target_dates):
                     if cancel_event_2.is_set():
+                        if tl:
+                            window.after(0, lambda: tl.set_step_status("transcribe", "error"))
                         window.after(0, lambda: _finish_parse_2(
                             window, False, "用户取消", progress_bar_2, button_stop_2,
-                            progress_label_2, button_5))
+                            progress_label_2, button_5, progress_row_bottom))
                         return
 
                     day_pct = int((date_idx / total_dates) * 100)
@@ -313,7 +338,7 @@ def button_5_clicked(window, treeview_1,
                     if result.get("cancelled"):
                         window.after(0, lambda: _finish_parse_2(
                             window, False, "用户取消", progress_bar_2, button_stop_2,
-                            progress_label_2, button_5))
+                            progress_label_2, button_5, progress_row_bottom))
                         return
                     if result.get("success"):
                         total_success += result.get("success_count", 0)
@@ -325,12 +350,18 @@ def button_5_clicked(window, treeview_1,
                     window, True,
                     f"批量解析完成（{total_dates} 天）：成功 {total_success}/{total_videos} 个视频"
                     + (f"，{total_failed} 天失败" if total_failed else ""),
-                    progress_bar_2, button_stop_2, progress_label_2, button_5))
+                    progress_bar_2, button_stop_2, progress_label_2, button_5,
+                    progress_row_bottom))
+                if tl and total_failed == 0:
+                    window.after(0, lambda: tl.set_step_status("transcribe", "done"))
             except Exception as e:
                 import traceback
+                if tl:
+                    window.after(0, lambda: tl.set_step_status("transcribe", "error"))
                 window.after(0, lambda: _finish_parse_2(
                     window, False, str(e),
-                    progress_bar_2, button_stop_2, progress_label_2, button_5))
+                    progress_bar_2, button_stop_2, progress_label_2, button_5,
+                    progress_row_bottom))
 
         threading.Thread(target=run, daemon=True).start()
     except Exception as e:
@@ -340,42 +371,26 @@ def button_5_clicked(window, treeview_1,
 
 
 def build_page_batch(window, parent):
-    """构建批量解析页，返回 (page_frame, ui_elements_dict)"""
+    """构建批量解析页（左侧树+按钮，右侧参数面板）"""
     global _window
     _window = window
 
-    page_frame = parent
+    page_frame = parent  # Canvas 内的 inner frame
 
-    canvas_page_2 = Canvas(
-        page_frame,
-        bg="#FFFFFF",
-        height=666,
-        width=796,
-        bd=0,
-        highlightthickness=0,
-        relief="ridge"
-    )
-    canvas_page_2.place(x=0, y=0)
+    # ═══════════ 左侧栏 ═══════════
+    left_frame = Frame(page_frame, bg="#FFFFFF")
+    left_frame.pack(side="left", fill="both", expand=True, padx=(6, 3), pady=4)
 
-    # 表头
-    canvas_page_2.create_rectangle(6, 10, 71, 46, fill="#FFFFFF", outline="#cfcece")
-    canvas_page_2.create_text(6, 10, anchor="nw", text="选中", fill="#000000",
-                              font=("Inter", 16 * -1, "normal"))
-    canvas_page_2.create_rectangle(71, 10, 162, 46, fill="#FFFFFF", outline="#cfcece")
-    canvas_page_2.create_text(71, 10, anchor="nw", text="UID", fill="#000000",
-                              font=("Inter", 16 * -1, "normal"))
-    canvas_page_2.create_rectangle(160, 10, 326, 46, fill="#FFFFFF", outline="#cfcece")
-    canvas_page_2.create_text(160, 10, anchor="nw", text="昵称", fill="#000000",
-                              font=("Inter", 16 * -1, "normal"))
-    canvas_page_2.create_rectangle(164, 504, 319, 544, fill="#FFFFFF", outline="#000000")
+    # ── UP主列表 ──
+    up_lf = ttk.LabelFrame(left_frame, text="UP主列表", padding=2)
+    up_lf.pack(fill="both", expand=True)
 
-    # Treeview
     style_treeview_1 = ttk.Style()
     style_treeview_1.configure("Treeview", rowheight=30, fieldbackground="#FFFFFF")
 
     treeview_1_cols = ["选中", "uid", "昵称"]
     treeview_1 = ttk.Treeview(
-        page_frame, columns=treeview_1_cols, show="headings", height=15
+        up_lf, columns=treeview_1_cols, show="headings", height=15
     )
     treeview_1.heading("选中", text="选中", anchor="center")
     treeview_1.column("选中", width=65, anchor="center")
@@ -385,6 +400,7 @@ def build_page_batch(window, parent):
     treeview_1.column("昵称", width=163, anchor="center")
     treeview_1.tag_configure("oddrow", background="#FFFFFF")
     treeview_1.tag_configure("evenrow", background="#F5F5F5")
+    treeview_1.pack(fill="both", expand=True, padx=2, pady=2)
 
     # 加载 UP 主数据
     up_list_data = load_up_list()
@@ -408,43 +424,105 @@ def build_page_batch(window, parent):
 
     treeview_1.bind("<Button-1>", on_treeview_click)
     treeview_1.bind("<Double-1>",
-        lambda e: on_double_click_edit(treeview_1, treeview_1_cols, page_frame, window, e))
+        lambda e: on_double_click_edit(treeview_1, treeview_1_cols, window, e))
 
-    treeview_1.place(x=6, y=10, width=317, height=467)
+    # ── 按钮区（2×2 grid） ──
+    btn_frame = Frame(left_frame, bg="#FFFFFF")
+    btn_frame.pack(fill="x", pady=(4, 0))
+    btn_frame.grid_columnconfigure(0, weight=1, uniform="batch_btn")
+    btn_frame.grid_columnconfigure(1, weight=1, uniform="batch_btn")
 
-    # 保存路径
-    canvas_page_2.create_text(6, 478, anchor="nw", text="保存于", fill="#000000",
-                              font=("Inter", 16 * -1, "normal"))
-    canvas_page_2.create_rectangle(70, 478, 310, 502, fill="#F0F0F0", outline="#cfcece")
-    _bp = batch_save_path
-    entry_batch_path_text = canvas_page_2.create_text(
-        74, 480, anchor="nw",
-        text=_bp[:40] + "..." if len(_bp) > 40 else _bp if _bp else "",
-        fill="#888888", font=("Inter", 12 * -1, "normal")
+    button_6 = Button(
+        btn_frame, text="保存修改",
+        bg="#03D7FC", fg="#FFFFFF",
+        font=("Inter", 16, "normal"),
+        borderwidth=0, highlightthickness=0,
+        command=lambda: button_6_clicked(treeview_1),
+        relief="flat", activebackground="#03D7FC", cursor="hand2"
     )
+    button_6.grid(row=0, column=0, sticky="nsew", padx=(0, 2), pady=2)
+
+    button_5 = Button(
+        btn_frame, text="解析",
+        bg="#000000", fg="#FFFFFF",
+        font=("Inter", 16, "normal"),
+        borderwidth=0, highlightthickness=0,
+        command=lambda: button_5_clicked(
+            window, treeview_1,
+            progress_label_2, progress_bar_2, button_stop_2, button_5,
+            progress_row_bottom),
+        relief="flat", activebackground="#000000", cursor="hand2"
+    )
+    button_5.grid(row=0, column=1, sticky="nsew", padx=(2, 0), pady=2)
+
+    button_add = Button(
+        btn_frame, text="新增",
+        bg="#4CAF50", fg="#FFFFFF",
+        font=("Inter", 16, "normal"),
+        borderwidth=0, highlightthickness=0,
+        command=lambda: add_new_row(treeview_1),
+        relief="flat", activebackground="#4CAF50", cursor="hand2"
+    )
+    button_add.grid(row=1, column=0, sticky="nsew", padx=(0, 2), pady=2)
+
+    button_delete = Button(
+        btn_frame, text="删除选中",
+        bg="#F44336", fg="#FFFFFF",
+        font=("Inter", 16, "normal"),
+        borderwidth=0, highlightthickness=0,
+        command=lambda: delete_selected(treeview_1),
+        relief="flat", activebackground="#F44336", cursor="hand2"
+    )
+    button_delete.grid(row=1, column=1, sticky="nsew", padx=(2, 0), pady=2)
+
+    # ═══════════ 右侧栏 ═══════════
+    right_frame = Frame(page_frame, bg="#FFFFFF", width=430)
+    right_frame.pack(side="right", fill="both", padx=(3, 6), pady=4)
+    right_frame.pack_propagate(False)
+
+    # ── 保存路径 ──
+    path_lf = ttk.LabelFrame(right_frame, text="保存路径", padding=4)
+    path_lf.pack(fill="x", pady=(0, 6))
+
+    _bp = batch_save_path
+    path_label_var = StringVar(
+        value=_bp[:40] + "..." if len(_bp) > 40 else _bp if _bp else "(未选择)"
+    )
+    path_row = Frame(path_lf, bg="#FFFFFF")
+    path_row.pack(fill="x")
+    path_display = Label(
+        path_row, textvariable=path_label_var,
+        bg="#F0F0F0", fg="#555555", anchor="w",
+        font=("", 12), relief="groove", padx=4
+    )
+    path_display.pack(side="left", fill="x", expand=True, padx=(0, 4))
 
     button_batch_browse = Button(
-        page_frame, text="浏览",
+        path_row, text="浏览",
         bg="#2196F3", fg="#FFFFFF",
         font=("Inter", 12, "normal"),
         borderwidth=0, highlightthickness=0,
-        command=lambda: button_batch_browse_clicked(canvas_page_2, entry_batch_path_text),
+        command=lambda: button_batch_browse_clicked(path_label_var),
         relief="flat", activebackground="#1976D2", cursor="hand2"
     )
-    button_batch_browse.place(x=316, y=478, width=60, height=24)
+    button_batch_browse.pack(side="right")
 
-    # 日期选择折叠按钮（上移避免浮层超出窗口，样式美化）
+    # ── 日期选择 ──
+    date_lf = ttk.LabelFrame(right_frame, text="目标日期", padding=4)
+    date_lf.pack(fill="x", pady=(0, 6))
+
     date_toggle_btn = Button(
-        page_frame,
+        date_lf,
         text=f"已选 {len(_selected_target_dates)} 天 ▼",
         bg="#E3F2FD", fg="#1565C0",
         font=("Inter", 14, "bold"),
         borderwidth=2, relief="groove",
         highlightthickness=0,
+        width=14,
         activebackground="#BBDEFB", activeforeground="#0D47A1",
         cursor="hand2",
     )
-    date_toggle_btn.place(x=500, y=456, width=200, height=38)
+    date_toggle_btn.pack()
 
     def _toggle_date_popup():
         global _date_popup, _selected_target_dates
@@ -456,7 +534,6 @@ def build_page_batch(window, parent):
         popup_h = 320
 
         def _calc_popup_xy():
-            """根据按钮当前屏幕坐标计算浮层位置（下方优先，空间不足向上）"""
             bx = date_toggle_btn.winfo_rootx()
             by_ = date_toggle_btn.winfo_rooty()
             bh = date_toggle_btn.winfo_height()
@@ -466,30 +543,26 @@ def build_page_batch(window, parent):
             else:
                 return bx, by_ - popup_h - 2
 
-        # 创建弹出层
         popup = Toplevel(window)
+        popup.transient(window)
         popup.overrideredirect(True)
         popup.attributes("-topmost", True)
         px, py = _calc_popup_xy()
-        popup.geometry(f"190x{popup_h}+{px}+{py}")
+        bw = date_toggle_btn.winfo_width()
+        popup.geometry(f"{bw}x{popup_h}+{px}+{py}")
         popup.lift()
-
         popup.configure(bg="#FFFFFF", highlightbackground="#2196F3",
                         highlightthickness=1)
         popup.bind("<Escape>", lambda e: _cancel_popup())
 
-        # ── 主窗口移动时浮层跟随 ──
         def _reposition_popup(event=None):
             if _date_popup is None or not _date_popup.winfo_exists():
                 return
             nx, ny = _calc_popup_xy()
-            _date_popup.geometry(f"190x{popup_h}+{nx}+{ny}")
+            _date_popup.geometry(f"{bw}x{popup_h}+{nx}+{ny}")
 
         _follow_id = window.bind("<Configure>", _reposition_popup, add="+")
 
-        # ── 点击浮层外部 → 确认关闭 ──
-        # 使用 bind_all（"all"标签在 bindtags 链最末，不干扰 Listbox 选择）
-        # after 延迟避免 toggle 按钮点击冒泡误触发
         def _on_global_click(event):
             if _date_popup is None or not _date_popup.winfo_exists():
                 return
@@ -499,6 +572,7 @@ def build_page_batch(window, parent):
                     return
             except Exception:
                 pass
+            _confirm_source[0] = "global_click"
             _confirm()
 
         _all_bind_id = [None]
@@ -506,7 +580,20 @@ def build_page_batch(window, parent):
             lambda: _all_bind_id.__setitem__(0,
                 window.bind_all("<Button-1>", _on_global_click, "+")))
 
-        # ── Listbox 区域（无滚动条，靠鼠标滚轮翻页） ──
+        _confirming = [False]
+        _confirm_source = ["unknown"]
+
+        def _on_focus_out(event):
+            if _confirming[0]:
+                return
+            if _date_popup is None or not _date_popup.winfo_exists():
+                return
+            _confirm_source[0] = "FocusOut"
+            _confirming[0] = True
+            _confirm()
+
+        _focus_out_id = window.bind("<FocusOut>", _on_focus_out, add="+")
+
         listbox = Listbox(
             popup,
             selectmode="multiple",
@@ -519,38 +606,42 @@ def build_page_batch(window, parent):
             borderwidth=0,
             highlightthickness=0,
             exportselection=False,
+            justify="center",
         )
 
-        # 填充 30 天，恢复已选，日期居中对齐（^20 填充）
         selected_set = set(_selected_target_dates)
         for i in range(30):
             d = _dt.date.today() - _dt.timedelta(days=29 - i)
             ds = d.strftime("%Y-%m-%d")
-            listbox.insert("end", f"{ds:^20}")
+            listbox.insert("end", ds)
             if ds in selected_set:
                 listbox.selection_set(i)
 
-        listbox.place(x=1, y=1, width=188, height=278)
+        listbox.place(x=1, y=1, width=bw - 2, height=278)
 
-        # ── 确认 / 取消 按钮栏 ──
         btn_bar = Frame(popup, bg="#F5F5F5", height=40)
-        btn_bar.place(x=0, y=280, width=190, height=40)
+        btn_bar.place(x=0, y=280, width=bw, height=40)
 
         def _cleanup():
-            """清理所有绑定"""
             try:
                 if _all_bind_id[0] is not None:
                     window.after_cancel(_all_bind_id[0])
             except Exception:
                 pass
             window.unbind_all("<Button-1>")
+            window.unbind("<FocusOut>", _focus_out_id)
 
         def _confirm():
-            global _date_popup
+            global _date_popup, _selected_target_dates
+            source = _confirm_source[0]
             sel_raw = [listbox.get(i) for i in listbox.curselection()]
             sel = [s.strip() for s in sel_raw]
+            debug(f"_confirm [{source}]: curselection indices={listbox.curselection()}, sel={sel}")
             if sel:
                 _selected_target_dates = sel
+                debug(f"_selected_target_dates updated to: {_selected_target_dates}")
+            else:
+                debug(f"_selected_target_dates NOT updated (sel empty), keeping: {_selected_target_dates}")
             date_toggle_btn.configure(
                 text=f"已选 {len(_selected_target_dates)} 天 ▼")
             _cleanup()
@@ -575,7 +666,7 @@ def build_page_batch(window, parent):
             font=("Inter", 11, "normal"),
             borderwidth=0, highlightthickness=0,
             relief="flat", activebackground="#1976D2",
-            cursor="hand2", command=_confirm,
+            cursor="hand2", command=lambda: (_confirm_source.__setitem__(0, "button_ok"), _confirm())[1],
         )
         btn_ok.place(x=5, y=5, width=85, height=30)
 
@@ -589,7 +680,6 @@ def build_page_batch(window, parent):
         )
         btn_cancel.place(x=100, y=5, width=85, height=30)
 
-        # popup 销毁时解绑所有
         def _on_destroy(event):
             try:
                 window.unbind("<Configure>", _follow_id)
@@ -601,80 +691,41 @@ def build_page_batch(window, parent):
             except Exception:
                 pass
             window.unbind_all("<Button-1>")
+            window.unbind("<FocusOut>", _focus_out_id)
 
         popup.bind("<Destroy>", _on_destroy)
-
         _date_popup = popup
 
     date_toggle_btn.configure(command=_toggle_date_popup)
 
-    # ── 进度区域 ──
-    progress_label_2 = Label(
-        page_frame, text="", fg="#555555", bg="#FFFFFF",
-        font=("Inter", 11), anchor="w"
-    )
-    progress_label_2.place(x=6, y=610, width=310, height=18)
-    progress_label_2.place_forget()
+    # ── 进度 ──
+    progress_lf = ttk.LabelFrame(right_frame, text="进度", padding=4)
+    progress_lf.pack(fill="x")
 
-    progress_bar_2 = ttk.Progressbar(page_frame, mode="determinate", length=240)
-    progress_bar_2.place(x=6, y=632, width=240, height=14)
-    progress_bar_2.place_forget()
+    progress_row_top = Frame(progress_lf, bg="#FFFFFF")
+    progress_row_bottom = Frame(progress_lf, bg="#FFFFFF")
+    # 初始仅显示 top（占位），bottom 运行时再展开
+    progress_row_top.pack(fill="x")
+
+    progress_label_2 = Label(
+        progress_row_top, text="", fg="#555555", bg="#FFFFFF",
+        font=("Inter", 11), anchor="w", wraplength=400
+    )
+    progress_label_2.pack(fill="x", padx=(0, 4))
+    progress_label_2.pack_forget()
+
+    progress_bar_2 = ttk.Progressbar(progress_row_bottom, mode="determinate")
+    # 不预 pack
 
     button_stop_2 = Button(
-        page_frame, text="停止", bg="#F44336", fg="#FFFFFF",
+        progress_row_bottom, text="停止", bg="#F44336", fg="#FFFFFF",
         font=("Inter", 10, "normal"), borderwidth=0, highlightthickness=0,
         relief="flat", activebackground="#D32F2F", cursor="hand2"
     )
-    button_stop_2.place(x=254, y=629, width=65, height=20)
-    button_stop_2.place_forget()
-
-    # ── 按钮区域 ──
-    button_6 = Button(
-        page_frame, text="保存修改",
-        bg="#03D7FC", fg="#FFFFFF",
-        font=("Inter", 16, "normal"),
-        borderwidth=0, highlightthickness=0,
-        command=lambda: button_6_clicked(treeview_1),
-        relief="flat", activebackground="#03D7FC", cursor="hand2"
-    )
-    button_6.place(x=0, y=504, width=155, height=40)
-
-    button_5 = Button(
-        page_frame, text="解析",
-        bg="#000000", fg="#FFFFFF",
-        font=("Inter", 16, "normal"),
-        borderwidth=0, highlightthickness=0,
-        command=lambda: button_5_clicked(
-            window, treeview_1,
-            progress_label_2, progress_bar_2, button_stop_2, button_5),
-        relief="flat", activebackground="#000000", cursor="hand2"
-    )
-    button_5.place(x=164, y=504, width=155, height=40)
-
-    button_add = Button(
-        page_frame, text="新增",
-        bg="#4CAF50", fg="#FFFFFF",
-        font=("Inter", 16, "normal"),
-        borderwidth=0, highlightthickness=0,
-        command=lambda: add_new_row(treeview_1),
-        relief="flat", activebackground="#4CAF50", cursor="hand2"
-    )
-    button_add.place(x=0, y=556, width=155, height=40)
-
-    button_delete = Button(
-        page_frame, text="删除选中",
-        bg="#F44336", fg="#FFFFFF",
-        font=("Inter", 16, "normal"),
-        borderwidth=0, highlightthickness=0,
-        command=lambda: delete_selected(treeview_1),
-        relief="flat", activebackground="#F44336", cursor="hand2"
-    )
-    button_delete.place(x=164, y=556, width=155, height=40)
+    # 不预 pack
 
     ui = {
         "page_frame": page_frame,
-        "canvas_page_2": canvas_page_2,
-        "entry_batch_path_text": entry_batch_path_text,
         "treeview_1": treeview_1,
         "treeview_1_cols": treeview_1_cols,
         "button_5": button_5,

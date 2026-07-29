@@ -22,6 +22,13 @@ _PROMPT_TEMPLATE = """你是一个量化交易辅助决策系统。请严格根�
 - MACD: DIF={dif}, DEA={dea}
 - RSI(14): {rsi}
 - BOLL: 上轨={boll_up}, 中轨={boll_mid}, 下轨={boll_dn}
+- KDJ: K={kdj_k}, D={kdj_d}, J={kdj_j}
+- BIAS: 6日={bias6}%, 12日={bias12}%, 24日={bias24}%
+- W&R(14): {wr}
+- ASI: {asi}
+- VR(26): {vr}
+- CCI(20): {cci}
+- DMI(14): ADX={adx}, +DI={pdi}, -DI={mdi}
 - MA({ma_short}): {ma_short_val}
 - MA({ma_long}): {ma_long_val}
 
@@ -112,6 +119,19 @@ def decide(
         boll_up=ind.get("BOLL_UP", "N/A"),
         boll_mid=ind.get("BOLL_MID", "N/A"),
         boll_dn=ind.get("BOLL_DN", "N/A"),
+        kdj_k=ind.get("KDJ_K", "N/A"),
+        kdj_d=ind.get("KDJ_D", "N/A"),
+        kdj_j=ind.get("KDJ_J", "N/A"),
+        bias6=ind.get("BIAS6", "N/A"),
+        bias12=ind.get("BIAS12", "N/A"),
+        bias24=ind.get("BIAS24", "N/A"),
+        wr=ind.get("WR", "N/A"),
+        asi=ind.get("ASI", "N/A"),
+        vr=ind.get("VR", "N/A"),
+        cci=ind.get("CCI", "N/A"),
+        adx=ind.get("ADX", "N/A"),
+        pdi=ind.get("+DI", "N/A"),
+        mdi=ind.get("-DI", "N/A"),
         ma_short=risk.get("ma_short", 10),
         ma_long=risk.get("ma_long", 30),
         ma_short_val=ind.get(f"MA{risk.get('ma_short', 10)}", "N/A"),

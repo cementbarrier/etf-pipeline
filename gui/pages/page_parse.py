@@ -17,12 +17,13 @@ from tkinter import (
     Button, Canvas, Entry, Label, ttk, messagebox, filedialog,
 )
 from backend.single_parser import parse_single
-from backend import time_price_judge, single_summary_client, task_queue_manager
+from backend import config_manager, time_price_judge, single_summary_client, task_queue_manager
 
 from gui.utils import create_rounded_rectangle, debug, peak_dialog
+from gui.timeline import get_timeline as _get_timeline
 
 # ── 模块级状态 ──
-selected_save_path = ""
+selected_save_path = config_manager.get_setting("parse_save_path")
 cancel_event_1 = Event()
 cancel_event_summary = Event()
 last_parsed_bvid = ""
@@ -43,6 +44,7 @@ def button_3_clicked(canvas_page_1, entry_single_path_text):
     path = filedialog.askdirectory(title="选择保存路径")
     if path:
         selected_save_path = path
+        config_manager.set_setting("parse_save_path", path)
         canvas_page_1.itemconfigure(entry_single_path_text,
             text=path[:40] + "..." if len(path) > 40 else path)
         debug(f"保存路径已选: {path}")
@@ -59,7 +61,7 @@ def _do_summary(window, summary_result_1, summary_btn_1, price_label_1):
             transcript = f.read()
     except Exception as e:
         summary_result_1.config(text=f"读取字幕失败: {e}")
-        summary_result_1.place(x=30, y=572, width=585, height=60)
+        summary_result_1.place(x=30, y=432, width=585, height=60)
         return
 
     if time_price_judge.is_peak():
@@ -74,12 +76,16 @@ def _do_summary(window, summary_result_1, summary_btn_1, price_label_1):
                 text=f"已加入延迟队列（{task_id.get('task_id', '?')}），"
                      f"低谷时段自动生成摘要。\n队列待处理: {task_queue_manager.get_pending_count()} 条"
             )
-            summary_result_1.place(x=30, y=572, width=585, height=60)
+            summary_result_1.place(x=30, y=432, width=585, height=60)
             return
 
     summary_btn_1.config(text="生成中...", state="disabled")
     summary_result_1.config(text="正在调用大模型...")
-    summary_result_1.place(x=30, y=572, width=585, height=60)
+    summary_result_1.place(x=30, y=432, width=585, height=60)
+
+    tl = _get_timeline()
+    if tl:
+        window.after(0, tl.highlight, "summary")
 
     def run():
         if cancel_event_summary.is_set():
@@ -91,15 +97,19 @@ def _do_summary(window, summary_result_1, summary_btn_1, price_label_1):
             return
         if res.get("status") == "done":
             window.after(0, lambda: _show_summary(res["summary"]))
+            if tl:
+                window.after(0, lambda: tl.set_step_status("summary", "done"))
         else:
             window.after(0, lambda: _show_summary(f"错误: {res.get('error', '未知')}"))
+            if tl:
+                window.after(0, lambda: tl.set_step_status("summary", "error"))
 
     def _show_summary(text):
         if cancel_event_summary.is_set():
             return
         summary_btn_1.config(text="生成 AI 摘要", state="normal")
         summary_result_1.config(text=text)
-        summary_result_1.place(x=30, y=572, width=585, height=60)
+        summary_result_1.place(x=30, y=432, width=585, height=60)
         try:
             from backend.feishu_notifier import notify_single_done, send_transcript_text
             notify_single_done()
@@ -152,9 +162,9 @@ def _finish_parse_1(window, success, msg, bv="", path="",
         if price_label_1:
             from backend.time_price_judge import get_price_label
             price_label_1.config(text=f"  当前: {get_price_label()}")
-            price_label_1.place(x=30, y=510, width=300, height=18)
+            price_label_1.place(x=172, y=370, width=300, height=18)
         if summary_btn_1:
-            summary_btn_1.place(x=30, y=530, width=180, height=36)
+            summary_btn_1.place(x=232, y=390, width=180, height=36)
 
 
 def button_4_clicked(window, entry_1, selected_save_path_getter,
@@ -162,7 +172,7 @@ def button_4_clicked(window, entry_1, selected_save_path_getter,
                      summary_result_1, summary_btn_1, price_label_1):
     global cancel_event_1, cancel_event_summary
     url = entry_1.get().strip()
-    if not url:
+    if not url or url == "Search...":
         messagebox.showwarning("提示", "请先输入视频链接")
         return
     save_path = selected_save_path_getter()
@@ -189,11 +199,49 @@ def button_4_clicked(window, entry_1, selected_save_path_getter,
     button_stop_1.place(x=540, y=280, width=75, height=20)
     button_stop_1.tkraise()
 
+    tl = _get_timeline()
+    if tl:
+        window.after(0, tl.reset)
+        window.after(0, tl.highlight, "fetch")
+
+    _tl_seen = set()
+    _tl_done = set()
+    _prev_stage = None
+
     def run():
         try:
             def progress_cb(ptype, msg, pct=0):
+                nonlocal _prev_stage
                 window.after(0, lambda: progress_label_1.configure(text=f"  {msg}"))
                 window.after(0, lambda: progress_bar_1.configure(value=pct))
+
+                # ── 时间轴更新（逐阶段标记完成） ──
+                if tl:
+                    detected = None
+                    if "下载" in msg:
+                        detected = "fetch"
+                    elif "音频" in msg or "提取" in msg:
+                        detected = "audio"
+                    elif "转写" in msg:
+                        detected = "transcribe"
+                    if detected and detected != _prev_stage:
+                        if _prev_stage and _prev_stage not in _tl_done:
+                            _tl_done.add(_prev_stage)
+                            window.after(0, tl.set_step_status, _prev_stage, "done")
+                        if detected not in _tl_seen:
+                            _tl_seen.add(detected)
+                            window.after(0, tl.highlight, detected)
+                        _prev_stage = detected
+                    if ptype == "done":
+                        if _prev_stage and _prev_stage not in _tl_done:
+                            _tl_done.add(_prev_stage)
+                            window.after(0, tl.set_step_status, _prev_stage, "done")
+                        window.after(0, lambda: tl.set_step_status("transcribe", "done"))
+                    elif ptype == "error":
+                        window.after(0, lambda: tl.set_step_status("transcribe", "error"))
+                    elif ptype == "cancelled":
+                        window.after(0, lambda: tl.set_step_status("transcribe", "error"))
+
                 if ptype == "done":
                     window.after(0, lambda: _finish_parse_1(
                         window, True, msg,
@@ -309,9 +357,11 @@ def build_page_parse(window, parent):
         30, 214, 370, 240,
         fill="#F0F0F0", outline="#cfcece")
 
+    initial_path = selected_save_path
+    display_path = (initial_path[:40] + "..." if len(initial_path) > 40 else initial_path) if initial_path else ""
     entry_single_path_text = canvas_page_1.create_text(
         34, 216, anchor="nw",
-        text="", fill="#888888",
+        text=display_path, fill="#888888",
         font=("Inter", 12 * -1, "normal")
     )
 

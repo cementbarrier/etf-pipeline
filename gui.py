@@ -35,7 +35,7 @@ _valley_scheduler = None
 def show_page(index: int):
     """切换标签页"""
     for i, btn in enumerate(_sidebar_buttons):
-        btn.configure(bg="#F7F7F7" if i == index else "#FFFFFF")
+        btn.configure(bg="#D0D0D0" if i == index else "#EBEBEB")
 
     tab_names = ["etf", "parse", "batch", "config"]
     if _timeline:
@@ -44,13 +44,17 @@ def show_page(index: int):
 
     for i, page in enumerate(_pages):
         if i == index:
-            page.place(x=198, y=34, width=796, height=666)
+            page.place(x=198, y=60, width=796, height=666)
         else:
             page.place_forget()
 
     # 配置页滚动条
+    if index == 3:
+        try:
+            _window._config_ui and _window._config_ui.get('refresh_all') and _window._config_ui['refresh_all']()
+        except: pass
     if index == 3 and _cfg_scrollbar is not None:
-        _cfg_scrollbar.place(x=974, y=34, height=666)
+        _cfg_scrollbar.place(x=974, y=60, height=666)
     elif _cfg_scrollbar is not None:
         _cfg_scrollbar.place_forget()
 
@@ -72,8 +76,8 @@ def create_main_window():
 
     _window = tk.Tk()
     _window.title("ETF Pipeline")
-    _window.geometry("994x700")
-    _window.configure(bg="#FFFFFF")
+    _window.geometry("994x724")
+    _window.configure(bg="#EBEBEB")
     _window.resizable(False, False)
 
     # 居中
@@ -81,33 +85,37 @@ def create_main_window():
     sw = _window.winfo_screenwidth()
     sh = _window.winfo_screenheight()
     x = (sw - 994) // 2
-    y = (sh - 700) // 2
+    y = (sh - 724) // 2
     _window.geometry(f"994x700+{x}+{y}")
 
     # ── 关闭行为 ──
     from gui.pages.tray import setup_window_tray_hooks
     setup_window_tray_hooks(_window)
 
+    # ── 全局字体放大 ──
+    style = ttk.Style()
+    style.configure("TLabelframe.Label", font=("Microsoft YaHei", 14, "bold"))
+
     # ── 时间轴 ──
     _timeline = PipelineTimeline(_window)
-    _timeline.place(x=0, y=0, width=994, height=34)
+    _timeline.place(x=0, y=0, width=994, height=60)
 
     # ── 侧边栏背景 ──
-    sidebar_bg = tk.Frame(_window, bg="#FFFFFF", width=198, height=666,
+    sidebar_bg = tk.Frame(_window, bg="#EBEBEB", width=198, height=666,
                           highlightthickness=0)
-    sidebar_bg.place(x=0, y=34)
+    sidebar_bg.place(x=0, y=60)
     sidebar_bg.lower()
 
-    sep = tk.Frame(_window, bg="#E0E0E0", width=1, height=666)
-    sep.place(x=197, y=34)
+    sep = tk.Frame(_window, bg="#C8C8C8", width=1, height=666)
+    sep.place(x=197, y=60)
 
     # ── 侧边栏标题 ──
     title_label = tk.Label(
         _window, text="ETF Pipeline",
-        bg="#FFFFFF", fg="#000000",
+        bg="#EBEBEB", fg="#000000",
         font=("Microsoft YaHei", 16, "bold"),
     )
-    title_label.place(x=0, y=34 + 46, width=198, height=36)
+    title_label.place(x=0, y=60 + 56, width=198, height=36)
 
     # ── 侧边栏导航按钮 ──
     tab_defs = [
@@ -117,19 +125,19 @@ def create_main_window():
         ("配置", 3),
     ]
 
-    base_y = 34 + 100
+    base_y = 234
     for label, idx in tab_defs:
         btn = tk.Button(
             _window, text=label,
-            bg="#F7F7F7" if idx == 0 else "#FFFFFF",
+            bg="#D0D0D0" if idx == 0 else "#EBEBEB",
             fg="#000000",
             font=("Microsoft YaHei", 14, "normal"),
             borderwidth=0, highlightthickness=0,
             command=lambda i=idx: show_page(i),
-            relief="flat", activebackground="#F7F7F7",
+            relief="flat", activebackground="#D0D0D0",
             cursor="hand2",
         )
-        btn.place(x=8, y=base_y + idx * 52, width=183, height=40)
+        btn.place(x=8, y=base_y + idx * 122, width=183, height=40)
         _sidebar_buttons.append(btn)
 
     # ── 构建各页面 ──
@@ -153,12 +161,33 @@ def create_main_window():
 
 
 def _build_etf_page():
-    """构建 ETF 分析页面"""
+    """构建 ETF 分析页面（Canvas 滚动）"""
     from gui.pages.page_etf import build_page_etf
     frame = tk.Frame(_window, bg="#FFFFFF", borderwidth=0, highlightthickness=0)
+    canvas = tk.Canvas(frame, bg="#FFFFFF", highlightthickness=0)
+    scrollbar = tk.Scrollbar(frame, orient="vertical", command=canvas.yview)
+    inner = tk.Frame(canvas, bg="#FFFFFF")
+    win_id = canvas.create_window((0, 0), window=inner, anchor="nw")
+    def _on_inner_configure(event):
+        b = canvas.bbox("all")
+        canvas.configure(scrollregion=(b[0], b[1], b[2], b[3] + 200) if b else (0, 0, 0, 0))
+    inner.bind("<Configure>", _on_inner_configure)
+    def _on_canvas_configure(event):
+        canvas.itemconfig(win_id, width=event.width)
+    canvas.bind("<Configure>", _on_canvas_configure)
+    canvas.configure(yscrollcommand=scrollbar.set)
+    def _on_mousewheel(event):
+        canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+    def _bind_wheel(event):
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+    def _unbind_wheel(event):
+        canvas.unbind_all("<MouseWheel>")
+    canvas.bind("<Enter>", _bind_wheel)
+    canvas.bind("<Leave>", _unbind_wheel)
+    canvas.pack(side="left", fill="both", expand=True)
+    scrollbar.pack(side="right", fill="y")
     _pages.append(frame)
-    _, ui = build_page_etf(_window, frame)
-    # 将关键 UI 引用存到全局
+    _, ui = build_page_etf(_window, inner)
     _window._etf_ui = ui
 
 
@@ -171,11 +200,33 @@ def _build_parse_page():
 
 
 def _build_batch_page():
-    """构建定期跟踪页面"""
+    """构建定期跟踪页面（Canvas 滚动）"""
     from gui.pages.page_batch import build_page_batch
     frame = tk.Frame(_window, bg="#FFFFFF", borderwidth=0, highlightthickness=0)
+    canvas = tk.Canvas(frame, bg="#FFFFFF", highlightthickness=0)
+    scrollbar = tk.Scrollbar(frame, orient="vertical", command=canvas.yview)
+    inner = tk.Frame(canvas, bg="#FFFFFF")
+    win_id = canvas.create_window((0, 0), window=inner, anchor="nw")
+    def _on_inner_configure(event):
+        b = canvas.bbox("all")
+        canvas.configure(scrollregion=(b[0], b[1], b[2], b[3] + 200) if b else (0, 0, 0, 0))
+    inner.bind("<Configure>", _on_inner_configure)
+    def _on_canvas_configure(event):
+        canvas.itemconfig(win_id, width=event.width)
+    canvas.bind("<Configure>", _on_canvas_configure)
+    canvas.configure(yscrollcommand=scrollbar.set)
+    def _on_mousewheel(event):
+        canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+    def _bind_wheel(event):
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+    def _unbind_wheel(event):
+        canvas.unbind_all("<MouseWheel>")
+    canvas.bind("<Enter>", _bind_wheel)
+    canvas.bind("<Leave>", _unbind_wheel)
+    canvas.pack(side="left", fill="both", expand=True)
+    scrollbar.pack(side="right", fill="y")
     _pages.append(frame)
-    build_page_batch(_window, frame)
+    build_page_batch(_window, inner)
 
 
 def _build_config_page():
@@ -185,6 +236,7 @@ def _build_config_page():
     scroll_frame, ui = build_page_config(_window, None, _window)
     _pages.append(scroll_frame)
     _cfg_scrollbar = ui.get("v_scrollbar_3")
+    _window._config_ui = ui
 
 
 # ── 启动 ──

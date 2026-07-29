@@ -13,6 +13,18 @@ from datetime import datetime
 
 logger = logging.getLogger("batch_parser")
 
+# ── 临时调试日志 ──
+_DEBUG_LOG_PATH = Path(__file__).parent.parent / "logs" / "batch_debug.log"
+def _debug_log(msg: str):
+    try:
+        _DEBUG_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime("%H:%M:%S")
+        with open(_DEBUG_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(f"[{ts}] {msg}\n")
+        logger.info(msg)
+    except Exception:
+        pass
+
 if getattr(sys, 'frozen', False):
     PROJECT_ROOT = Path(sys._MEIPASS)
 else:
@@ -95,6 +107,10 @@ def batch_parse(uid_list: list, save_dir: str, callback=None, cancel_event=None,
 
         date_label = target_date if target_date else "今日"
         videos = fetcher.get_up_videos(uid, headers, target_date=target_date, cancel_event=cancel_event)
+        _debug_log(f"UP {uid} 未筛选前: {len(videos)} 个视频 | target_date={target_date}")
+        # 关键词过滤：仅保留股票相关视频
+        videos = fetcher.filter_stock_videos(videos)
+        _debug_log(f"UP {uid} 筛选后: {len(videos)} 个视频")
 
         if cancel_event.is_set():
             if callback:

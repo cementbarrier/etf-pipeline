@@ -26,6 +26,18 @@ PIPELINE_STEPS = {
     "config": [],
 }
 
+_instance = None
+
+
+def set_timeline(inst):
+    global _instance
+    _instance = inst
+
+
+def get_timeline():
+    return _instance
+
+
 STEP_COLORS = {
     "pending": "#CCCCCC",
     "active": "#0078D4",
@@ -41,7 +53,7 @@ class PipelineTimeline(tk.Frame):
     """水平流水线步骤条"""
 
     def __init__(self, parent, **kwargs):
-        super().__init__(parent, bg="#F3F3F3", height=36, **kwargs)
+        super().__init__(parent, bg="#EBEBEB", height=60, **kwargs)
         self._mode = "etf"
         self._step_status = {}
         self._step_labels = []
@@ -49,10 +61,12 @@ class PipelineTimeline(tk.Frame):
         self._connectors = []
         self._canvas = None
         self._build()
+        global _instance
+        _instance = self
 
     def _build(self):
         self._canvas = tk.Canvas(
-            self, bg="#F3F3F3", height=36,
+            self, bg="#EBEBEB", height=60,
             bd=0, highlightthickness=0,
         )
         self._canvas.pack(fill="x", expand=True)
@@ -100,7 +114,7 @@ class PipelineTimeline(tk.Frame):
         n = len(steps)
         spacing = (w - 20) // max(n, 1)
         start_x = (w - (spacing * (n - 1))) // 2
-        radius = 6
+        radius = 7
 
         self._step_labels.clear()
         self._step_circles.clear()
@@ -108,7 +122,7 @@ class PipelineTimeline(tk.Frame):
 
         for i, (label, key) in enumerate(steps):
             cx = start_x + i * spacing
-            cy = 10
+            cy = 20
             status = self._step_status.get(key, "pending")
 
             color = STEP_COLORS.get(status, "#CCCCCC")
@@ -125,10 +139,10 @@ class PipelineTimeline(tk.Frame):
             # 文字
             text_color = STEP_COLORS.get(f"{status}_text", "#333333")
             self._canvas.create_text(
-                cx, cy + 16,
+                cx, cy + 22,
                 text=label,
                 fill=text_color,
-                font=("Microsoft YaHei", 9),
+                font=("Microsoft YaHei", 10),
                 anchor="n",
                 tags=(f"step_{key}",)
             )

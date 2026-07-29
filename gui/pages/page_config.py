@@ -489,6 +489,10 @@ def build_page_config(window, parent, notebook_parent):
         "feishu_enabled_var": feishu_enabled_var,
         "feishu_webhook_entry": feishu_webhook_entry,
         "refresh_queue_status": _refresh_queue_status,
+        "refresh_all": lambda: _config_refresh_all(canvas_page_3,
+            b2t_path_text, cookie_path_text, debug_log_path_text,
+            provider_combo, api_key_entry, model_combo,
+            email_sender_entry, email_auth_entry),
     }
     return scroll_canvas_3, ui
 

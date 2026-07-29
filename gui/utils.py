@@ -81,10 +81,10 @@ def peak_dialog(window, title="高峰时段提醒"):
         return True
     dialog = Toplevel(window)
     dialog.title(title)
-    dialog.geometry("380x210")
     dialog.resizable(False, False)
     dialog.transient(window)
     dialog.grab_set()
+    dialog.withdraw()  # 隐藏窗口，避免在左上角闪现
     result = {"action": False, "suppress": False}
 
     Label(dialog, text="当前为 DeepSeek 高峰时段（双倍价）。",
@@ -110,7 +110,15 @@ def peak_dialog(window, title="高峰时段提醒"):
 
     Button(btn_frame, text="立即执行（是）", command=_do_yes, width=15).pack(side="left", padx=10)
     Button(btn_frame, text="入队延迟（否）", command=_do_no, width=15).pack(side="left", padx=10)
-    dialog.wait_window()
+
+    # 所有控件布局完成后，一次性计算居中位置
+    dialog.update_idletasks()
+    w = dialog.winfo_width()
+    h = dialog.winfo_height()
+    x = window.winfo_rootx() + (window.winfo_width() - w) // 2
+    y = window.winfo_rooty() + (window.winfo_height() - h) // 2
+    dialog.geometry(f"{w}x{h}+{x}+{y}")
+    dialog.deiconify()  # 在正确位置显示
     if result["suppress"]:
         _peak_suppressed_today = True
     return result["action"]

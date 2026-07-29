@@ -152,18 +152,6 @@ def get_up_videos(mid, headers, target_date=None, hours=None, cancel_event=None)
     if cancel_event and cancel_event.is_set():
         return []
 
-    params = {
-        'mid': mid,
-        'ps': 30,
-        'pn': 1,
-        'order': 'pubdate',
-    }
-
-    # WBI 签名
-    img_key, sub_key = get_wbi_keys(headers)
-    if img_key and sub_key:
-        params = sign_params(params, img_key, sub_key)
-
     # 计算过滤窗口
     if target_date:
         try:
@@ -184,42 +172,82 @@ def get_up_videos(mid, headers, target_date=None, hours=None, cancel_event=None)
         day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         day_end = day_start + timedelta(days=1)
 
-    try:
-        resp = requests.get(
-            "https://api.bilibili.com/x/space/wbi/arc/search",
-            params=params, headers=headers, timeout=8
-        )
+    all_videos = []
+    max_pages = 10  # 最多 300 条，避免无限翻页
+
+    for pn in range(1, max_pages + 1):
         if cancel_event and cancel_event.is_set():
             return []
-        data = resp.json()
-        if data.get('code') != 0:
-            logger.warning(f"  API 返回错误 mid={mid}: {data.get('message')}")
-            return []
 
-        videos = data.get('data', {}).get('list', {}).get('vlist', [])
+        params = {
+            'mid': mid,
+            'ps': 30,
+            'pn': pn,
+            'order': 'pubdate',
+        }
 
-        recent_videos = []
-        for v in videos:
-            pub_ts = v.get('created', 0)
-            pub_time = datetime.fromtimestamp(pub_ts)
-            if day_start <= pub_time < day_end:
-                # 用 or '' 而非 get(..., '')：B站 API 可能返回 null，.get 只在 key 不存在时用默认值
-                description = v.get('description') or ''
-                recent_videos.append({
-                    'aid': v.get('aid'),
-                    'bvid': v.get('bvid'),
-                    'title': v.get('title'),
-                    'description': description,
-                    'pub_time': pub_time.strftime('%Y-%m-%d %H:%M:%S'),
-                    'duration': v.get('length', ''),
-                    'play': v.get('play', 0),
-                })
+        img_key, sub_key = get_wbi_keys(headers)
+        if img_key and sub_key:
+            params = sign_params(params, img_key, sub_key)
 
-        return recent_videos
+        try:
+            resp = requests.get(
+                "https://api.bilibili.com/x/space/wbi/arc/search",
+                params=params, headers=headers, timeout=8
+            )
+            if cancel_event and cancel_event.is_set():
+                return []
+            data = resp.json()
+            if data.get('code') != 0:
+                logger.warning(f"  API 返回错误 mid={mid}: {data.get('message')}")
+                break
 
-    except Exception as e:
-        logger.error(f"  拉取失败 mid={mid}: {e}")
-        return []
+            videos = data.get('data', {}).get('list', {}).get('vlist', [])
+            if not videos:
+                break
+
+            page_size = len(videos)
+
+            for v in videos:
+                pub_ts = v.get('created', 0)
+                pub_time = datetime.fromtimestamp(pub_ts)
+                if day_start <= pub_time < day_end:
+                    description = v.get('description') or ''
+                    all_videos.append({
+                        'aid': v.get('aid'),
+                        'bvid': v.get('bvid'),
+                        'title': v.get('title'),
+                        'description': description,
+                        'pub_time': pub_time.strftime('%Y-%m-%d %H:%M:%S'),
+                        'duration': v.get('length', ''),
+                        'play': v.get('play', 0),
+                    })
+
+            # 该页最早视频已早于目标窗口，后续页不可能命中
+            last_ts = videos[-1].get('created', 0)
+            last_pub = datetime.fromtimestamp(last_ts)
+            if last_pub < day_start:
+                break
+
+            # 不足一页说明已拉完
+            if page_size < 30:
+                break
+
+        except Exception as e:
+            logger.error(f"  拉取失败 mid={mid} pn={pn}: {e}")
+            break
+
+    # 调试日志：写文件确保可见
+    _debug_btch = Path(PROJECT_ROOT) / "logs" / "batch_debug.log"
+    try:
+        _debug_btch.parent.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime("%H:%M:%S")
+        with open(_debug_btch, "a", encoding="utf-8") as _f:
+            _f.write(f"[{ts}] get_up_videos mid={mid} pn={pn} 页, 命中 {len(all_videos)} 个 | target_date={target_date}\n")
+    except Exception:
+        pass
+    logger.info(f"  [DEBUG] get_up_videos mid={mid} target_date={target_date}: 翻了 {pn} 页, 命中 {len(all_videos)} 个视频")
+    return all_videos
 
 
 def enrich_description(bvid, headers):

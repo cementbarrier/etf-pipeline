@@ -73,16 +73,11 @@ def _hide_to_tray(window):
 def _show_close_dialog(window):
     """显示关闭行为选择对话框，返回用户选择的 action 或 None（取消）"""
     dialog = tk.Toplevel(window)
+    dialog.withdraw()
     dialog.title("关闭行为")
-    dialog.geometry("380x220")
     dialog.resizable(False, False)
     dialog.transient(window)
     dialog.grab_set()
-
-    dialog.update_idletasks()
-    x = window.winfo_x() + (window.winfo_width() - 380) // 2
-    y = window.winfo_y() + (window.winfo_height() - 220) // 2
-    dialog.geometry(f"+{x}+{y}")
 
     last_action = get_setting("close_action") or "tray"
     action_var = tk.StringVar(value=last_action)
@@ -111,6 +106,12 @@ def _show_close_dialog(window):
     btn_frame.pack(pady=(5, 10))
     tk.Button(btn_frame, text="取消", width=10, command=on_cancel).pack(side="left", padx=10)
     tk.Button(btn_frame, text="确定", width=10, command=on_confirm, bg="#0078D4", fg="white").pack(side="left", padx=10)
+
+    dialog.update_idletasks()
+    x = window.winfo_rootx() + (window.winfo_width() - 380) // 2
+    y = window.winfo_rooty() + (window.winfo_height() - 220) // 2
+    dialog.geometry(f"380x220+{x}+{y}")
+    dialog.deiconify()
 
     dialog.wait_window()
     return result["action"]
