@@ -245,11 +245,21 @@ def _fetch_akshare_minute(symbol: str, period: str = "60", count: int = 200) -> 
 
 # ── 统一入口 ──
 
+_last_fetch_error: Optional[str] = None
+
+
+def get_last_fetch_error() -> Optional[str]:
+    """返回最近一次 fetch_etf_daily 的失败原因，诊断用"""
+    return _last_fetch_error
+
+
 def fetch_etf_daily(symbol: str, count: int = 200) -> Optional[pd.DataFrame]:
     """获取 ETF 日 K 线（含今日实时行情），根据配置数据源路由。
 
     akshare 失败自动降级到 baostock，baostock 失败自动降级到 akshare。
     """
+    global _last_fetch_error
+    _last_fetch_error = None
     source = get_data_source()
     fallback = "baostock" if source == "akshare" else "akshare"
 
@@ -273,19 +283,31 @@ def fetch_etf_daily(symbol: str, count: int = 200) -> Optional[pd.DataFrame]:
     primary_fn = _try_baostock if source == "baostock" else _try_akshare
     fallback_fn = _try_akshare if source == "baostock" else _try_baostock
 
+    primary_error = None
+    fallback_error = None
+
     try:
         df = primary_fn()
         if df is not None and not df.empty:
             return df
-    except Exception:
-        pass
+    except Exception as e:
+        primary_error = str(e)
 
-    # 回退
     try:
-        return fallback_fn()
-    except Exception:
-        pass
+        df = fallback_fn()
+        if df is not None and not df.empty:
+            return df
+    except Exception as e:
+        fallback_error = str(e)
 
+    parts = []
+    if primary_error:
+        parts.append(f"[{source}] {primary_error}")
+    if fallback_error:
+        parts.append(f"[{fallback}] {fallback_error}")
+    if not parts:
+        parts.append(f"{source} 和 {fallback} 均返回空数据")
+    _last_fetch_error = "\n".join(parts)
     return None
 
 

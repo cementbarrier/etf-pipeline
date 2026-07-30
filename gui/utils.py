@@ -119,6 +119,7 @@ def peak_dialog(window, title="高峰时段提醒"):
     y = window.winfo_rooty() + (window.winfo_height() - h) // 2
     dialog.geometry(f"{w}x{h}+{x}+{y}")
     dialog.deiconify()  # 在正确位置显示
+    dialog.wait_window()
     if result["suppress"]:
         _peak_suppressed_today = True
     return result["action"]

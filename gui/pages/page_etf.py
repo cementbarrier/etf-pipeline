@@ -6,7 +6,7 @@ from datetime import datetime
 import tkinter as tk
 from tkinter import ttk,scrolledtext,messagebox,filedialog
 from backend.config_manager import get_setting,set_setting,get_risk_params,DEFAULTS
-from backend.data_fetcher import fetch_etf_daily
+from backend.data_fetcher import fetch_etf_daily, get_last_fetch_error as get_data_error
 from backend.factor_engine import run_factor_pipeline
 from backend.llm_decision import decide
 from backend.position_fetcher import format_positions_for_prompt,format_balance_for_prompt
@@ -114,8 +114,12 @@ def build_page_etf(window,parent):
     def _save_prov(e):
         p=prov_var.get();ms=PROVIDER_MODELS.get(p,[])
         model_cb["values"]=ms
-        if ms:model_var.set(ms[0])
-        set_setting("llm_provider",p);set_setting("llm_model",ms[0]if ms else"")
+        # 仅当当前模型不在新提供商的列表中时，才自动切到第一个
+        current_model = model_var.get()
+        if current_model not in ms:
+            model_var.set(ms[0] if ms else "")
+            set_setting("llm_model", ms[0] if ms else "")
+        set_setting("llm_provider",p)
     def _save_model(e=None):set_setting("llm_model",model_var.get())
     def _save_key(e=None):set_setting("llm_api_key",api_var.get())
     prov_cb.bind("<<ComboboxSelected>>",_save_prov)
@@ -472,7 +476,11 @@ def build_page_etf(window,parent):
             max_bars = max(days, 30)
             df = fetch_etf_daily(symbol, count=max_bars)
             if df is None or df.empty:
-                _log(f"错误: 无法获取 {symbol} 行情数据")
+                err_detail = get_data_error()
+                if err_detail:
+                    _log(f"错误: 无法获取 {symbol} 行情数据\n  {err_detail}")
+                else:
+                    _log(f"错误: 无法获取 {symbol} 行情数据")
                 _err("data")
                 return
 
